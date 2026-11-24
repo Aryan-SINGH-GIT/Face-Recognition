@@ -1,5 +1,6 @@
 import io
 import sys
+import gc
 import torch
 import numpy as np
 from pathlib import Path
@@ -31,6 +32,14 @@ class FaceService:
 
         # Device selection (CPU or CUDA)
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+        # Optimize CPU PyTorch threads to reduce memory footprint on 512MB RAM containers
+        if self.device.type == "cpu":
+            try:
+                torch.set_num_threads(1)
+                torch.set_num_interop_threads(1)
+            except Exception:
+                pass
 
         # Models
         self.mtcnn = None
@@ -38,12 +47,25 @@ class FaceService:
         self.faiss_manager = None
         self.is_loaded = False
 
+    def init_faiss(self):
+        """Loads lightweight Faiss vector index into memory (uses <2MB RAM)."""
+        if self.faiss_manager is None:
+            self.faiss_manager = FaissManager(
+                index_path=str(self.index_path),
+                mapping_path=str(self.mapping_path),
+                embedding_dim=self.embedding_dim
+            )
+
     def load_models(self):
-        """Initializes and preheats MTCNN, InceptionResnetV1, and Faiss in memory."""
+        """Initializes and preheats MTCNN, InceptionResnetV1, and Faiss in memory with strict RAM limits."""
         if self.is_loaded:
             return
 
-        print(f"[FaceService] Loading models on device: {self.device}")
+        print(f"[FaceService] Loading models on device: {self.device} (Memory optimized)")
+        self.init_faiss()
+
+        # Disable autograd globally to prevent gradient graph memory consumption
+        torch.set_grad_enabled(False)
         
         # Initialize MTCNN detector
         self.mtcnn = MTCNN(
@@ -56,30 +78,27 @@ class FaceService:
             device=self.device
         )
 
-        # Initialize FaceNet encoder
+        # Initialize FaceNet encoder in evaluation mode
         self.resnet = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
-
-        # Initialize Faiss Vector DB
-        self.faiss_manager = FaissManager(
-            index_path=str(self.index_path),
-            mapping_path=str(self.mapping_path),
-            embedding_dim=self.embedding_dim
-        )
+        for param in self.resnet.parameters():
+            param.requires_grad = False
 
         self.is_loaded = True
+        gc.collect()
         print(f"[FaceService] Models loaded. Faiss vector count: {self.faiss_manager.index.ntotal}")
 
     def _extract_embedding(self, img: Image.Image) -> tuple[np.ndarray | None, str | None]:
-        """Detects face and generates a 512-D FaceNet embedding."""
+        """Detects face and generates a 512-D FaceNet embedding using inference_mode for minimum RAM usage."""
         face_tensor = self.mtcnn(img)
         if face_tensor is None:
             return None, "No human face detected in the image"
 
         face_tensor = face_tensor.unsqueeze(0).to(self.device)
-        with torch.no_grad():
+        with torch.inference_mode():
             embedding = self.resnet(face_tensor)
 
         embedding_np = embedding.squeeze().cpu().numpy().astype("float32")
+        del face_tensor, embedding
         return embedding_np, None
 
     def verify_face(
@@ -267,12 +286,12 @@ class FaceService:
 
     def get_identities(self) -> list[str]:
         """Returns sorted list of unique enrolled identities."""
-        if not self.is_loaded:
-            self.load_models()
+        self.init_faiss()
         return sorted(list(set(self.faiss_manager.identities)))
 
     def get_stats(self) -> dict:
-        """Returns operational statistics of the service."""
+        """Returns operational statistics of the service without triggering heavy model load."""
+        self.init_faiss()
         total_embeddings = self.faiss_manager.index.ntotal if self.faiss_manager else 0
         unique_identities = len(self.get_identities()) if self.faiss_manager else 0
         return {

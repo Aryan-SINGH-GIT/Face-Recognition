@@ -86,9 +86,9 @@ async def lifespan(app: FastAPI):
     print("[FastAPI] Initializing SQLite relational tables...")
     Base.metadata.create_all(bind=engine)
 
-    # 2. Pre-warm Neural Networks & Faiss Store
-    print("[FastAPI] Pre-warming MTCNN, FaceNet, and Faiss Vector Store...")
-    face_service.load_models()
+    # 2. Pre-warm Faiss Vector Store (Neural networks load lazily on first verify/enroll to save RAM)
+    print("[FastAPI] Initializing Faiss Vector Store...")
+    face_service.init_faiss()
     
     # 3. Create default admin user if none exists
     from app.db.database import SessionLocal
