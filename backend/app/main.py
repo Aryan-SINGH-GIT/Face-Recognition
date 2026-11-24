@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 
 # Ensure backend directory is in sys.path
@@ -116,15 +117,24 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration for frontend clients (Restricted to local origins for security)
+# CORS configuration for frontend clients (Supports local dev, Render subdomains, and custom env origins)
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+if allowed_origins_env:
+    for origin in allowed_origins_env.split(","):
+        cleaned = origin.strip()
+        if cleaned and cleaned not in allowed_origins:
+            allowed_origins.append(cleaned)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

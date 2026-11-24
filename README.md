@@ -85,6 +85,40 @@ npm run dev   # Runs on http://localhost:5173
 
 ---
 
+## ☁️ Deploy to Render
+
+The repository includes a ready-to-use Render Blueprint (`render.yaml`) that configures both the FastAPI backend web service and the React frontend static site automatically.
+
+### Option A: 1-Click Blueprint Deploy (Recommended)
+1. Fork or push this repository to GitHub.
+2. Go to [Render Dashboard](https://dashboard.render.com/) and click **New +** → **Blueprint**.
+3. Connect your `Face-Recognition` repository.
+4. Render will read `render.yaml` and provision:
+   - **`face-recognition-backend`**: Python FastAPI Web Service (`uvicorn`, PyTorch CPU, Faiss, and SQLite/PostgreSQL).
+   - **`face-recognition-frontend`**: React Vite Static Site with automatic SPA client-side routing.
+5. Click **Apply** to deploy both services simultaneously.
+
+### Option B: Deploy Backend & Frontend Separately on Render
+
+#### Backend (Web Service):
+- **Runtime:** `Python 3` (or `Docker`)
+- **Build Command:** `bash build.sh`
+- **Start Command:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- **Environment Variables:**
+  - `PYTHON_VERSION`: `3.11.9`
+  - `JWT_SECRET`: *(Any secure random string)*
+  - `ALLOWED_ORIGINS`: `https://your-frontend.onrender.com`
+
+#### Frontend (Static Site):
+- **Root Directory:** `frontend`
+- **Build Command:** `npm install && npm run build`
+- **Publish Directory:** `dist`
+- **Redirects / Rewrites:** Rewrite `/*` to `/index.html` (for React Router)
+- **Environment Variables:**
+  - `VITE_API_URL`: `https://your-backend.onrender.com`
+
+---
+
 ## 💻 Usage & Capabilities
 
 1. **Face Access Terminal (`/`):** Stream live webcam frames to verify identity or self-enroll biometric profile with passive anti-spoofing protection.
