@@ -6,6 +6,7 @@ from torchvision import datasets, transforms
 # Point directly to the local dataset provided by the user
 DATA_DIR = Path(__file__).parent / "dataset atelier 4"
 
+
 def get_dataloader(batch_size=32, num_workers=0):
     """Returns a PyTorch DataLoader for the local dataset."""
     if not DATA_DIR.exists():

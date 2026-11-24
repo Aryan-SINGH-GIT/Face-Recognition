@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c)
 ![Faiss](https://img.shields.io/badge/Faiss-Vector%20DB-blueviolet)
-![Status](https://img.shields.io/badge/Status-Phase%201%20Completed-success)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-success)
 
 An Enterprise-grade Face Recognition and Verification System built using **MTCNN** (Multi-task Cascaded Convolutional Networks) for face detection, **FaceNet (InceptionResnetV1)** for deep facial feature extraction, and **Faiss** for ultra-fast vector similarity search. 
 
@@ -19,7 +19,8 @@ This repository contains the Machine Learning pipeline capable of zero-shot face
 - **Accurate Face Detection:** Uses MTCNN to locate, crop, and align faces from raw images, ignoring background noise.
 - **Deep Feature Extraction:** Uses a FaceNet model pre-trained on `vggface2` to map faces into highly robust 512-dimensional embeddings.
 - **Ultra-Fast Vector DB:** Utilizes Facebook AI Similarity Search (Faiss) to store embeddings and instantly match incoming faces against the database via L2 Euclidean Distance.
-- **Evaluation & Metrics:** Includes Jupyter notebooks to generate ROC curves and calculate True Accept Rate (TAR) vs. False Accept Rate (FAR). Evaluated model achieved an **AUC of 98.6%**.
+- **Evaluation & Model Benchmarking:** Includes Jupyter notebooks to generate ROC curves, calculate True Accept Rate (TAR) vs. False Accept Rate (FAR), and compare FaceNet against ArcFace, VGG-Face, MobileFaceNet, and LBPH.
+- **Enterprise Design Docs:** Complete [High-Level Design (HLD)](docs/HIGH_LEVEL_DESIGN.md), [Low-Level Design (LLD)](docs/LOW_LEVEL_DESIGN.md), and [Entity-Relationship Diagram (ERD)](docs/ERD_DESIGN.md) with dark-mode Mermaid diagrams.
 
 ---
 
@@ -31,80 +32,73 @@ face_recognition/
 ├── ml/                         # Core Machine Learning Pipeline
 │   ├── dataset atelier 4/      # Local face dataset (Folders named by identity)
 │   ├── notebooks/
-│   │   └── 01_Evaluation_TAR_FAR.ipynb  # Biometric Evaluation & ROC plotting
+│   │   ├── 01_Evaluation_TAR_FAR.ipynb               # Biometric Evaluation & ROC plotting
+│   │   └── 02_Model_Comparison_and_Evaluation.ipynb  # Comparative Benchmarks (FaceNet, ArcFace, etc.)
 │   ├── dataset.py              # PyTorch DataLoader for image ingestion
 │   ├── face_encoder.py         # Extracts faces & builds the Faiss Vector Database
 │   ├── faiss_manager.py        # Faiss indexing, saving, and searching logic
 │   ├── test_match.py           # Verification script to test new faces against DB
 │   └── requirements.txt        # Python dependencies
 │
-├── backend/                    # FastAPI Server (Upcoming Phase)
-├── frontend/                   # React Web App (Upcoming Phase)
+├── backend/                    # FastAPI Server (REST API, JWT Auth, SQLite Audit Logs)
+├── frontend/                   # React Web App (Vite, Webcam HUD, Admin Dashboard)
+├── docs/                       # System Architecture & Design Specifications
+│   ├── VIVA_EXPLANATION_GUIDE.md # Comprehensive Viva, Math, Trade-offs & Theory Guide
+│   ├── HIGH_LEVEL_DESIGN.md    # HLD: Architecture, AWS Deployment, Security & Workflows
+│   ├── LOW_LEVEL_DESIGN.md     # LLD: Classes, Tensors, API Schemas & Sequence Diagrams
+│   └── ERD_DESIGN.md           # ERD: Relational Schema & Faiss Hybrid Storage Model
 └── README.md                   
 ```
 
 ---
 
-## 🚀 Installation & Setup
+## 🚀 Installation & Quick Start
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/face-recognition-system.git
-   cd face-recognition-system
-   ```
+### 1. Clone the repository
+```bash
+git clone https://github.com/Aryan-SINGH-GIT/Face-Recognition.git
+cd Face-Recognition
+```
 
-2. **Create a Virtual Environment**
-   ```bash
-   python -m venv venv
-   
-   # Windows Activation:
-   .\venv\Scripts\Activate
-   
-   # Linux/Mac Activation:
-   source venv/bin/activate
-   ```
+### 2. Backend Setup (FastAPI & ML Engine)
+```bash
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate   # On Linux/macOS: source venv/bin/activate
 
-3. **Install Dependencies**
-   ```bash
-   cd ml
-   pip install -r requirements.txt
-   ```
-   *(Note: This installs PyTorch, Facenet-PyTorch, Faiss-CPU, Scikit-learn, and Matplotlib).*
+# Install dependencies
+cd backend
+pip install -r requirements.txt
+
+# Start the FastAPI server (Runs on http://localhost:8000)
+uvicorn app.main:app --reload --port 8000
+```
+Interactive API documentation is available at `http://localhost:8000/docs`.
+
+### 3. Frontend Setup (React + Vite)
+```bash
+# In a separate terminal:
+cd frontend
+npm install
+npm run dev   # Runs on http://localhost:5173
+```
 
 ---
 
-## 💻 Usage Instructions
+## 💻 Usage & Capabilities
 
-### 1. Build the Database (Face Enrollment)
-Place images of people you want to recognize inside `ml/dataset atelier 4/` (one folder per person). Then, run the encoder to detect their faces and save their 512-D vectors into the Faiss index.
-```bash
-cd ml
-python face_encoder.py
-```
-*Output: Generates `index.faiss` and `identities.json` in the `ml` folder.*
-
-### 2. Test Face Verification
-To check if a new image matches anyone in the database, pass the image path to the test script:
-```bash
-python test_match.py "path/to/test/image.jpg"
-```
-*Output: Crops the face, generates a new vector, searches Faiss, and returns the closest match identity and mathematical distance.*
-
-### 3. Run the Evaluation Notebook
-To view the mathematical accuracy of the model (ROC Curve and AUC score):
-1. Open `ml/notebooks/01_Evaluation_TAR_FAR.ipynb` in VS Code or Jupyter.
-2. Select your `venv` as the Python Kernel.
-3. Run all cells to generate pairs, compute distances, and plot the True Accept Rate (TAR) vs. False Accept Rate (FAR) graphs.
+1. **Face Access Terminal (`/`):** Stream live webcam frames to verify identity or self-enroll biometric profile with passive anti-spoofing protection.
+2. **Admin Dashboard (`/dashboard`):** Real-time KPI metrics, verification pass rates, engine hardware configurations, and one-click Anti-Spoofing toggle.
+3. **Identities Manager (`/identities`):** Admin portal to inspect, enroll, or delete registered identities and automatically trigger Faiss index reconstruction.
+4. **Audit Logs (`/logs`):** Immutable compliance access logs recorded in SQLite relational database with status, timestamp, distance, and client IP.
+5. **Biometric Benchmarking (`ml/notebooks/`):**
+   - `01_Evaluation_TAR_FAR.ipynb`: Computes TAR at FAR=1%, FAR=10%, and plots ROC curve ($AUC = 98.6\%$).
+   - `02_Model_Comparison_and_Evaluation.ipynb`: Comprehensive comparison between FaceNet, ArcFace, VGG-Face, MobileFaceNet, and LBPH with EER and decision frontiers.
 
 ---
 
 ## 🧠 Technical Architecture Decisions
-* **Why MTCNN?** Better than traditional OpenCV Haar Cascades for handling poor lighting, varying angles, and facial alignment.
-* **Why FaceNet over LBPH?** Deep Learning understands 3D facial geometry rather than just pixel intensity, making it highly robust to visual changes.
-* **Why Faiss?** Allows scalable, millisecond-fast searches across millions of vectors, making this system enterprise-ready.
-
----
-
-## 📈 Next Steps (Phase 3 & 4)
-- **Phase 3:** Wrap the ML engine into a `FastAPI` REST server for asynchronous, HTTP-based verification.
-- **Phase 4:** Build a `React` web interface to stream webcam video and visualize security dashboard results.
+* **Why MTCNN?** Multi-task Cascaded Convolutional Networks handle varying angles, poor lighting, and 5-point landmark eye alignment far better than traditional Haar Cascades.
+* **Why FaceNet (Inception-ResNet-v1)?** Metric Triplet Loss projects faces onto a 512-dimensional $L_2$-normalized unit hypersphere, enabling instant zero-shot enrollment without model retraining.
+* **Why Faiss (`IndexFlatL2`)?** Hardware-accelerated SIMD vector search in RAM delivers sub-millisecond nearest neighbor queries across thousands of face embeddings.
+* **Why Passive Anti-Spoofing?** Laplacian variance and texture analysis reject printed photos, paper masks, and phone screen replays before neural inference runs.

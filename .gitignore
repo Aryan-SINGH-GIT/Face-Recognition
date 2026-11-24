@@ -34,5 +34,22 @@ Thumbs.db
 index.faiss
 identities.json
 
+# Local SQLite databases & test logs
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Node dependencies and build artifacts
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+
 # (Optional) If your dataset gets too large, you might want to uncomment the line below to ignore it
 # ml/dataset atelier 4/

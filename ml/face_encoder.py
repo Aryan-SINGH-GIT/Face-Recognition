@@ -18,6 +18,7 @@ def build_index():
         device=device
     )
 
+#
     # Initialize InceptionResnetV1 (FaceNet encoder)
     resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 
@@ -26,7 +27,7 @@ def build_index():
     loader, classes = get_dataloader(batch_size=batch_size)
     
     manager = FaissManager(
-        index_path="index.faiss", 
+        index_path="index.faiss", #max(1,0)
         mapping_path="identities.json", 
         embedding_dim=512
     )
