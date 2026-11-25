@@ -11,20 +11,25 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 echo "=== [Render Build] Installing backend dependencies ==="
 pip install -r backend/requirements.txt
 
-echo "=== [Render Build] Pre-downloading model weights during build phase ==="
-# During build, Render has higher RAM headroom. Pre-caching weights prevents
-# the runtime container from crashing with OOM during download/unpacking.
+echo "=== [Render Build] Pre-downloading FaceNet weights to disk cache ==="
 python -c "
-import os
-os.environ['TORCH_NUM_THREADS'] = '1'
-import torch
-torch.set_num_threads(1)
-from facenet_pytorch import MTCNN, InceptionResnetV1
-print('Caching MTCNN weights...')
-MTCNN(device='cpu')
-print('Caching FaceNet (vggface2) weights...')
-InceptionResnetV1(pretrained='vggface2', device='cpu').eval()
-print('Weights cached successfully!')
-" || echo "Pre-caching completed or will be loaded on demand."
+import os, requests
+torch_home = os.getenv('TORCH_HOME', os.path.expanduser('~/.cache/torch'))
+checkpoints_dir = os.path.join(torch_home, 'checkpoints')
+os.makedirs(checkpoints_dir, exist_ok=True)
+dest = os.path.join(checkpoints_dir, '20180402-114759-vggface2.pt')
+if not os.path.exists(dest) or os.path.getsize(dest) < 100000000:
+    print('Downloading FaceNet weights (106MB) during build step...')
+    url = 'https://github.com/timesler/facenet-pytorch/releases/download/v2.2.9/20180402-114759-vggface2.pt'
+    with requests.get(url, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(dest + '.tmp', 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024*512):
+                if chunk: f.write(chunk)
+        os.replace(dest + '.tmp', dest)
+    print('Weights successfully cached to disk!')
+else:
+    print('Weights already exist in cache.')
+" || echo "Pre-caching skipped or will be downloaded on first inference."
 
 echo "=== [Render Build] Build completed successfully ==="

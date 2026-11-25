@@ -1,5 +1,6 @@
 import io
 import sys
+import os
 import gc
 import requests
 import torch
@@ -57,42 +58,40 @@ class FaceService:
                 embedding_dim=self.embedding_dim
             )
 
-    def _ensure_weights_on_disk(self):
+    def _ensure_weights_on_disk(self) -> Path:
         """Safely streams FaceNet weights directly to disk in 512KB chunks, avoiding RAM exhaustion."""
-        try:
-            hub_dir = torch.hub.get_dir()
-            checkpoints_dir = Path(hub_dir) / "checkpoints"
-            checkpoints_dir.mkdir(parents=True, exist_ok=True)
-            weights_file = checkpoints_dir / "20180402-114759-vggface2.pt"
+        torch_home = os.getenv("TORCH_HOME", os.path.expanduser("~/.cache/torch"))
+        checkpoints_dir = Path(torch_home) / "checkpoints"
+        checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        weights_file = checkpoints_dir / "20180402-114759-vggface2.pt"
 
-            if not weights_file.exists() or weights_file.stat().st_size < 100_000_000:
-                print(f"[FaceService] Streaming FaceNet weights directly to disk: {weights_file}")
-                url = "https://github.com/timesler/facenet-pytorch/releases/download/v2.2.9/20180402-114759-vggface2.pt"
-                with requests.get(url, stream=True, timeout=120) as resp:
-                    resp.raise_for_status()
-                    temp_file = checkpoints_dir / "20180402-114759-vggface2.pt.tmp"
-                    with open(temp_file, "wb") as f:
-                        for chunk in resp.iter_content(chunk_size=1024 * 512):
-                            if chunk:
-                                f.write(chunk)
-                    temp_file.replace(weights_file)
-                print("[FaceService] Weights downloaded and saved safely to disk.")
-        except Exception as e:
-            print(f"[FaceService] Warning during weights streaming: {e}")
+        if not weights_file.exists() or weights_file.stat().st_size < 100_000_000:
+            print(f"[FaceService] Streaming FaceNet weights directly to disk: {weights_file}")
+            url = "https://github.com/timesler/facenet-pytorch/releases/download/v2.2.9/20180402-114759-vggface2.pt"
+            with requests.get(url, stream=True, timeout=120) as resp:
+                resp.raise_for_status()
+                temp_file = checkpoints_dir / "20180402-114759-vggface2.pt.tmp"
+                with open(temp_file, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024 * 512):
+                        if chunk:
+                            f.write(chunk)
+                temp_file.replace(weights_file)
+            print("[FaceService] Weights downloaded and saved safely to disk.")
+        return weights_file
 
     def load_models(self):
-        """Initializes and preheats MTCNN, InceptionResnetV1, and Faiss in memory with strict RAM limits."""
+        """Initializes MTCNN and FaceNet in bfloat16 to cut RAM in half, safely under 512MB."""
         if self.is_loaded:
             return
 
-        print(f"[FaceService] Loading models on device: {self.device} (Memory optimized)")
+        print(f"[FaceService] Loading models on device: {self.device} (bfloat16 memory-optimized)")
         self.init_faiss()
 
-        # Disable autograd globally to prevent gradient graph memory consumption
+        # Disable autograd globally
         torch.set_grad_enabled(False)
         
-        # Ensure weights are saved on disk first so torch doesn't download into memory buffer
-        self._ensure_weights_on_disk()
+        # Ensure weights are saved on disk first
+        weights_path = self._ensure_weights_on_disk()
 
         # Initialize MTCNN detector
         self.mtcnn = MTCNN(
@@ -105,27 +104,42 @@ class FaceService:
             device=self.device
         )
 
-        # Initialize FaceNet encoder in evaluation mode
-        self.resnet = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
+        # Initialize FaceNet encoder in bfloat16 to cut memory by 50%
+        self.resnet = InceptionResnetV1(pretrained=None).eval()
+        
+        # Load weights directly into CPU, discarding classification logits to save memory
+        sd = torch.load(str(weights_path), map_location="cpu", weights_only=True)
+        sd.pop("logits.weight", None)
+        sd.pop("logits.bias", None)
+        
+        # Convert tensor weights to bfloat16 for half-precision storage
+        sd_bf = {k: v.to(torch.bfloat16) if v.is_floating_point() else v for k, v in sd.items()}
+        del sd
+        
+        self.resnet.to(torch.bfloat16)
+        self.resnet.load_state_dict(sd_bf, strict=False)
+        del sd_bf
+
         for param in self.resnet.parameters():
             param.requires_grad = False
 
         self.is_loaded = True
         gc.collect()
-        print(f"[FaceService] Models loaded. Faiss vector count: {self.faiss_manager.index.ntotal}")
+        print(f"[FaceService] Models loaded successfully in bfloat16. Faiss vector count: {self.faiss_manager.index.ntotal}")
 
     def _extract_embedding(self, img: Image.Image) -> tuple[np.ndarray | None, str | None]:
-        """Detects face and generates a 512-D FaceNet embedding using inference_mode for minimum RAM usage."""
+        """Detects face and generates a 512-D FaceNet embedding in bfloat16."""
         face_tensor = self.mtcnn(img)
         if face_tensor is None:
             return None, "No human face detected in the image"
 
-        face_tensor = face_tensor.unsqueeze(0).to(self.device)
+        face_tensor = face_tensor.unsqueeze(0).to(dtype=torch.bfloat16, device=self.device)
         with torch.inference_mode():
             embedding = self.resnet(face_tensor)
 
-        embedding_np = embedding.squeeze().cpu().numpy().astype("float32")
+        embedding_np = embedding.squeeze().float().cpu().numpy().astype("float32")
         del face_tensor, embedding
+        gc.collect()
         return embedding_np, None
 
     def verify_face(
