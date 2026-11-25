@@ -127,9 +127,12 @@ allowed_origins = [
 ]
 if allowed_origins_env:
     for origin in allowed_origins_env.split(","):
-        cleaned = origin.strip()
-        if cleaned and cleaned not in allowed_origins:
-            allowed_origins.append(cleaned)
+        cleaned = origin.strip().rstrip("/")
+        if cleaned:
+            if cleaned not in allowed_origins:
+                allowed_origins.append(cleaned)
+            if (cleaned + "/") not in allowed_origins:
+                allowed_origins.append(cleaned + "/")
 
 app.add_middleware(
     CORSMiddleware,
@@ -300,17 +303,33 @@ async def verify_identity(
     4. Searches nearest neighbor in Faiss Vector Database
     5. Automatically logs the audit event to SQLite database
     """
-    image_bytes = await read_and_validate_image(file)
+    try:
+        image_bytes = await read_and_validate_image(file)
 
-    # Check effective spoof detection setting (global setting && request param)
-    effective_liveness = check_liveness and is_spoof_detection_enabled(db)
+        # Check effective spoof detection setting (global setting && request param)
+        effective_liveness = check_liveness and is_spoof_detection_enabled(db)
 
-    # Perform Verification via FaceService
-    result = face_service.verify_face(
-        image_bytes=image_bytes,
-        threshold=threshold,
-        check_liveness=effective_liveness
-    )
+        # Perform Verification via FaceService
+        result = face_service.verify_face(
+            image_bytes=image_bytes,
+            threshold=threshold,
+            check_liveness=effective_liveness
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[verify] Error during verification pipeline: {e}")
+        return VerifyResponse(
+            verified=False,
+            status="ERROR",
+            identity=None,
+            distance=None,
+            confidence=0.0,
+            threshold=threshold or 1.2,
+            is_live=False,
+            liveness_score=None,
+            message=f"Biometric processing error: {str(e)}"
+        )
 
     # Persistent Audit Log insertion
     client_ip = request.client.host if request.client else "unknown"
@@ -498,15 +517,30 @@ async def user_login(
     Runs liveness check → FaceNet → Faiss nearest-neighbour → returns GRANTED / DENIED.
     Also updates last_seen_at and total_access on success.
     """
-    image_bytes = await read_and_validate_image(file)
+    try:
+        image_bytes = await read_and_validate_image(file)
 
-    # Check effective spoof detection setting (global setting && request param)
-    effective_liveness = check_liveness and is_spoof_detection_enabled(db)
+        # Check effective spoof detection setting (global setting && request param)
+        effective_liveness = check_liveness and is_spoof_detection_enabled(db)
 
-    result = face_service.verify_face(
-        image_bytes=image_bytes,
-        check_liveness=effective_liveness
-    )
+        result = face_service.verify_face(
+            image_bytes=image_bytes,
+            check_liveness=effective_liveness
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[user_login] Error during verification pipeline: {e}")
+        return UserLoginFaceResponse(
+            granted=False,
+            full_name=None,
+            display_name=None,
+            confidence=0.0,
+            is_live=False,
+            status="ERROR",
+            message=f"Biometric processing error: {str(e)}",
+            total_access=None
+        )
 
     # Log the access attempt
     client_ip = request.client.host if request.client else "unknown"

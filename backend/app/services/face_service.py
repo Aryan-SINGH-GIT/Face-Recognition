@@ -1,6 +1,7 @@
 import io
 import sys
 import gc
+import requests
 import torch
 import numpy as np
 from pathlib import Path
@@ -56,6 +57,29 @@ class FaceService:
                 embedding_dim=self.embedding_dim
             )
 
+    def _ensure_weights_on_disk(self):
+        """Safely streams FaceNet weights directly to disk in 512KB chunks, avoiding RAM exhaustion."""
+        try:
+            hub_dir = torch.hub.get_dir()
+            checkpoints_dir = Path(hub_dir) / "checkpoints"
+            checkpoints_dir.mkdir(parents=True, exist_ok=True)
+            weights_file = checkpoints_dir / "20180402-114759-vggface2.pt"
+
+            if not weights_file.exists() or weights_file.stat().st_size < 100_000_000:
+                print(f"[FaceService] Streaming FaceNet weights directly to disk: {weights_file}")
+                url = "https://github.com/timesler/facenet-pytorch/releases/download/v2.2.9/20180402-114759-vggface2.pt"
+                with requests.get(url, stream=True, timeout=120) as resp:
+                    resp.raise_for_status()
+                    temp_file = checkpoints_dir / "20180402-114759-vggface2.pt.tmp"
+                    with open(temp_file, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=1024 * 512):
+                            if chunk:
+                                f.write(chunk)
+                    temp_file.replace(weights_file)
+                print("[FaceService] Weights downloaded and saved safely to disk.")
+        except Exception as e:
+            print(f"[FaceService] Warning during weights streaming: {e}")
+
     def load_models(self):
         """Initializes and preheats MTCNN, InceptionResnetV1, and Faiss in memory with strict RAM limits."""
         if self.is_loaded:
@@ -67,6 +91,9 @@ class FaceService:
         # Disable autograd globally to prevent gradient graph memory consumption
         torch.set_grad_enabled(False)
         
+        # Ensure weights are saved on disk first so torch doesn't download into memory buffer
+        self._ensure_weights_on_disk()
+
         # Initialize MTCNN detector
         self.mtcnn = MTCNN(
             image_size=160,
