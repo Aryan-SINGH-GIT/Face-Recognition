@@ -388,10 +388,20 @@ def list_enrolled_identities():
 @app.delete("/identities/{identity_name}", response_model=DeleteIdentityResponse, tags=["Biometrics"])
 def delete_enrolled_identity(
     identity_name: str,
-    current_admin: dict = Depends(get_current_admin)
+    current_admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db)
 ):
-    """De-registers an employee and rebuilds the Faiss index (Requires Admin JWT)."""
+    """De-registers an employee, removes them from both Faiss and SQLite, and rebuilds the vector index."""
     result = face_service.delete_identity(identity_name=identity_name)
+
+    # Also clean up from RegisteredUser table in database (case-insensitive)
+    clean_target = identity_name.strip().lower()
+    users_to_delete = db.query(RegisteredUser).all()
+    for u in users_to_delete:
+        if u.full_name.strip().lower() == clean_target or (u.display_name and u.display_name.strip().lower() == clean_target):
+            db.delete(u)
+    db.commit()
+
     if not result["success"]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -471,30 +481,39 @@ async def user_register(
     """
     clean_name = sanitize_identity_name(full_name)
 
-    # Prevent duplicate registration
-    existing = db.query(RegisteredUser).filter(RegisteredUser.full_name == clean_name).first()
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"'{clean_name}' is already registered. Please sign in instead."
-        )
+    # Check if this identity already exists in SQLite (case-insensitive)
+    existing = db.query(RegisteredUser).filter(
+        func.lower(RegisteredUser.full_name) == clean_name.lower()
+    ).first()
 
     image_bytes = await read_and_validate_image(file)
 
-    # Enroll into Faiss (with duplicate biometric check)
+    # If identity is re-registering, remove their prior vector embedding so it can be updated
+    if existing:
+        face_service.delete_identity(identity_name=clean_name)
+        for enrolled_id in face_service.get_identities():
+            if enrolled_id.lower() == clean_name.lower():
+                face_service.delete_identity(identity_name=enrolled_id)
+
+    # Enroll into Faiss (with duplicate biometric check against OTHER identities)
     result = face_service.enroll_face(image_bytes=image_bytes, identity_name=clean_name)
     if not result["success"]:
         err_status = status.HTTP_409_CONFLICT if result.get("already_enrolled") else status.HTTP_422_UNPROCESSABLE_ENTITY
         raise HTTPException(status_code=err_status, detail=result["message"])
 
-    # Persist to SQLite
+    # Persist or update in SQLite
     friendly = (display_name or full_name).strip()
-    user_row = RegisteredUser(
-        full_name=clean_name,
-        display_name=friendly,
-        registered_at=datetime.datetime.utcnow()
-    )
-    db.add(user_row)
+    if existing:
+        existing.full_name = clean_name
+        existing.display_name = friendly
+        existing.registered_at = datetime.datetime.utcnow()
+    else:
+        user_row = RegisteredUser(
+            full_name=clean_name,
+            display_name=friendly,
+            registered_at=datetime.datetime.utcnow()
+        )
+        db.add(user_row)
     db.commit()
 
     return UserRegisterFaceResponse(

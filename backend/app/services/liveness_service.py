@@ -47,10 +47,12 @@ class LivenessService:
         # -------------------------------------------------------------
         # 3. Mobile Display Frequency Spectrum / Moire Analysis
         # -------------------------------------------------------------
-        f_transform = np.fft.fft2(gray)
+        # Analyze central face ROI so background foliage / roof grids do not trigger false Moire
+        center_gray = gray[int(h * 0.15):int(h * 0.85), int(w * 0.15):int(w * 0.85)]
+        f_transform = np.fft.fft2(center_gray)
         f_shift = np.fft.fftshift(f_transform)
         magnitude_spectrum = 20 * np.log(np.abs(f_shift) + 1e-6)
-        high_freq_ratio = float(np.mean(magnitude_spectrum > 130))
+        high_freq_ratio = float(np.mean(magnitude_spectrum > 135))
 
         # -------------------------------------------------------------
         # 4. Mobile Screen Specular Glare / Glass Reflection Analysis
@@ -97,11 +99,11 @@ class LivenessService:
         # Anti-Spoofing Rejection Rules
         # -------------------------------------------------------------
         # Check A: Mobile Screen Bezel & Screen Signature (Device Frame in view)
-        if has_phone_bezel and (high_freq_ratio > 0.25 or specular_ratio > 0.015):
+        if has_phone_bezel and (high_freq_ratio > 0.30 or specular_ratio > 0.02):
             return False, liveness_score, "Spoof detected: Mobile phone screen / device frame detected in camera view"
 
-        # Check B: Extreme Digital Display Moire Pattern
-        if high_freq_ratio >= 0.70:
+        # Check B: Digital Display Moire Pattern (Requires screen bezel or glassy specular glare)
+        if (high_freq_ratio >= 0.92 and specular_ratio > 0.025) or (high_freq_ratio >= 0.85 and has_phone_bezel):
             return False, liveness_score, f"Spoof detected: Digital display screen replay detected (Moire ratio: {high_freq_ratio:.3f})"
 
         # Check C: Extremely Blurry / Out-of-Focus Monochrome Paper
